@@ -1,0 +1,725 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MECH SIMULATOR 3D</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;overflow:hidden;background:#111820;color:white;font-family:Arial,sans-serif}
+canvas{display:block}
+button,select{border:0;border-radius:8px;padding:11px 15px;font-weight:bold;cursor:pointer}
+button{background:#ffb72e;color:#241800}
+button:active{transform:scale(.95)}
+#menu{position:fixed;inset:0;z-index:10;background:linear-gradient(140deg,#101d2beF,#10151df5);display:flex;align-items:center;justify-content:center;overflow:auto}
+.panel{width:min(850px,94%);padding:25px;background:#172333;border:1px solid #50657b;border-radius:18px}
+h1{font-size:clamp(32px,6vw,55px);color:#ffc04b;margin:0}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin-top:22px}
+.machine{background:#25374b;border:1px solid #405873;border-radius:13px;padding:16px;cursor:pointer}
+.machine:hover{border-color:#ffc04b;background:#30445b}
+.machine .emoji{font-size:36px}
+.machine strong{display:block;margin:8px 0}
+.machine small{color:#b7c7d8;line-height:1.5}
+#hud{position:fixed;top:12px;left:12px;z-index:3;display:none;gap:8px;flex-wrap:wrap}
+.stat{background:#101b2bdd;border:1px solid #52677e;border-radius:9px;padding:10px;font-size:13px}
+#info{position:fixed;left:12px;top:72px;background:#101b2bdd;padding:12px;border-radius:10px;font-size:13px;line-height:1.7;display:none;z-index:3}
+#help{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#101b2bdd;padding:10px;border-radius:8px;font-size:12px;display:none;z-index:3;text-align:center}
+#controls{position:fixed;bottom:65px;left:50%;transform:translateX(-50%);display:none;gap:7px;z-index:4;flex-wrap:wrap;justify-content:center;width:95%}
+#controls button{min-width:45px;padding:12px}
+#exit{position:fixed;right:12px;top:12px;z-index:4;display:none}
+#toast{position:fixed;top:70px;left:50%;transform:translateX(-50%);z-index:11;background:#204438;padding:12px 18px;border-radius:10px;display:none}
+#settings{position:fixed;right:12px;top:65px;z-index:4;display:none}
+@media(max-width:600px){
+ #help{bottom:145px;font-size:10px;width:94%}
+ #controls{bottom:65px}
+ #info{top:70px;font-size:11px}
+}
+</style>
+</head>
+<body>
+
+<div id="menu">
+ <div class="panel">
+  <h1>MECH SIMULATOR</h1>
+  <p style="color:#b7c7d8">3D Heavy Machinery • Construction • Mud Cleaning</p>
+  <div class="grid">
+   <div class="machine" onclick="startGame('excavator')">
+    <div class="emoji">🚜</div><strong>Excavator</strong><small>Dig mud, fill bucket and clean the site</small>
+   </div>
+   <div class="machine" onclick="startGame('truck')">
+    <div class="emoji">🚛</div><strong>Dump Truck</strong><small>Drive and transport materials</small>
+   </div>
+   <div class="machine" onclick="startGame('crane')">
+    <div class="emoji">🏗️</div><strong>Crane</strong><small>Operate a lifting hook</small>
+   </div>
+   <div class="machine" onclick="startGame('tractor')">
+    <div class="emoji">🚜</div><strong>Tractor</strong><small>Drive a powerful tractor</small>
+   </div>
+   <div class="machine" onclick="startGame('factory')">
+    <div class="emoji">⚙️</div><strong>Factory</strong><small>Operate industrial machinery</small>
+   </div>
+  </div>
+  <p style="margin-top:20px">
+   Graphics:
+   <select id="quality" onchange="setQuality(this.value)">
+    <option value="low">Low</option>
+    <option value="medium" selected>Medium</option>
+    <option value="high">High</option>
+    <option value="ultra">Ultra</option>
+   </select>
+  </p>
+  <small style="color:#9eb0c3">Single HTML file • 3D engine • PC and mobile controls</small>
+ </div>
+</div>
+
+<div id="hud">
+ <div class="stat">💰 Money: ₹<b id="money">0</b></div>
+ <div class="stat">🟤 Cleaned: <b id="cleaned">0</b>%</div>
+ <div class="stat">🪣 Bucket: <b id="load">0</b>/10</div>
+</div>
+<div id="info"></div>
+<div id="help">WASD: Drive • Q/E: Machine controls • SPACE: Dig • F: Unload • Mouse drag: Camera</div>
+<div id="controls">
+ <button data-key="w">▲</button>
+ <button data-key="q">Q</button>
+ <button data-key="e">E</button>
+ <button data-action="dig">DIG</button>
+ <button data-key="a">◀</button>
+ <button data-key="s">▼</button>
+ <button data-key="d">▶</button>
+ <button data-action="unload">F</button>
+</div>
+<button id="exit" onclick="backToMenu()">EXIT</button>
+<button id="settings" onclick="cycleQuality()">GRAPHICS</button>
+<div id="toast"></div>
+
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.161.0/build/three.module.js';
+
+/* ---------------- RENDERER ---------------- */
+
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setSize(innerWidth,innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio,1.5));
+renderer.shadowMap.enabled=true;
+renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+renderer.toneMapping=THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure=1;
+document.body.appendChild(renderer.domElement);
+
+const scene=new THREE.Scene();
+scene.background=new THREE.Color(0x91aabd);
+scene.fog=new THREE.Fog(0x91aabd,55,155);
+
+const camera=new THREE.PerspectiveCamera(60,innerWidth/innerHeight,.1,400);
+camera.position.set(12,11,16);
+
+scene.add(new THREE.HemisphereLight(0xffffff,0x514536,1.8));
+
+const sun=new THREE.DirectionalLight(0xffe4b5,2.5);
+sun.position.set(25,35,20);
+sun.castShadow=true;
+sun.shadow.mapSize.set(2048,2048);
+sun.shadow.camera.left=-65;
+sun.shadow.camera.right=65;
+sun.shadow.camera.top=65;
+sun.shadow.camera.bottom=-65;
+scene.add(sun);
+
+const world=new THREE.Group();
+scene.add(world);
+
+/* ---------------- GAME STATE ---------------- */
+
+const keys=new Set();
+let active=false;
+let mode='';
+let machine=null;
+let arm=null;
+let secondArm=null;
+let bucket=null;
+let hook=null;
+let truckBed=null;
+let conveyor=null;
+
+let mud=[];
+let rotors=[];
+let money=Number(localStorage.getItem('mechMoney')||0);
+let load=0;
+let totalMud=0;
+let cleaned=0;
+let camAngle=0;
+let camHeight=10;
+let dragging=false;
+let lastX=0;
+let lastY=0;
+let quality='medium';
+
+const clock=new THREE.Clock();
+
+function material(color,roughness=.85,metalness=0){
+ return new THREE.MeshStandardMaterial({
+  color,roughness,metalness
+ });
+}
+
+function box(parent,x,y,z,w,h,d,color){
+ const mesh=new THREE.Mesh(
+  new THREE.BoxGeometry(w,h,d),
+  material(color)
+ );
+ mesh.position.set(x,y,z);
+ mesh.castShadow=true;
+ mesh.receiveShadow=true;
+ parent.add(mesh);
+ return mesh;
+}
+
+function cylinder(parent,x,y,z,r,h,color,axis='y'){
+ const mesh=new THREE.Mesh(
+  new THREE.CylinderGeometry(r,r,h,20),
+  material(color)
+ );
+ if(axis==='x')mesh.rotation.z=Math.PI/2;
+ if(axis==='z')mesh.rotation.x=Math.PI/2;
+ mesh.position.set(x,y,z);
+ mesh.castShadow=true;
+ mesh.receiveShadow=true;
+ parent.add(mesh);
+ return mesh;
+}
+
+function sphere(parent,x,y,z,r,color){
+ const mesh=new THREE.Mesh(
+  new THREE.SphereGeometry(r,16,12),
+  material(color)
+ );
+ mesh.position.set(x,y,z);
+ mesh.castShadow=true;
+ parent.add(mesh);
+ return mesh;
+}
+
+/* ---------------- ENVIRONMENT ---------------- */
+
+function createGround(){
+ box(world,0,-.5,0,180,.8,180,0x77766e);
+ box(world,0,-.04,0,65,.12,65,0x8a7658);
+
+ // Mud working area
+ box(world,0,.05,-12,34,.12,24,0x493421);
+
+ // Mud pieces
+ for(let i=0;i<100;i++){
+  const x=(Math.random()-.5)*32;
+  const z=-12+(Math.random()-.5)*22;
+  const m=sphere(
+   world,x,.16,z,.16+Math.random()*.25,0x60452d
+  );
+  m.scale.y=.3;
+  mud.push(m);
+ }
+ totalMud=mud.length;
+
+ // Puddles
+ for(let i=0;i<9;i++){
+  const p=new THREE.Mesh(
+   new THREE.CircleGeometry(1+Math.random()*1.5,32),
+   new THREE.MeshStandardMaterial({
+    color:0x354d53,roughness:.12,metalness:.2
+   })
+  );
+  p.rotation.x=-Math.PI/2;
+  p.position.set(
+   (Math.random()-.5)*30,.14,
+   -12+(Math.random()-.5)*20
+  );
+  world.add(p);
+ }
+
+ // Construction barriers
+ for(let i=0;i<12;i++){
+  box(world,-20+i*3.6,.55,2,2,.9,.4,0xf2a927);
+ }
+
+ // Trees
+ for(let i=0;i<28;i++){
+  const x=(Math.random()-.5)*110;
+  const z=(Math.random()-.5)*110;
+  if(Math.abs(x)<23&&z<5&&z>-28)continue;
+  cylinder(world,x,1,z,.25,2,0x65452d);
+  sphere(world,x,2.5,z,1.2,0x367449);
+ }
+
+ // Buildings in the distance
+ for(let i=0;i<10;i++){
+  const x=(Math.random()-.5)*100;
+  const z=-45-Math.random()*35;
+  box(world,x,4,z,8,8,8,0x64727e);
+ }
+
+ // Dumping zone
+ box(world,0,.05,-29,12,.12,5,0x4e5759);
+ box(world,7,.7,-29,.3,1.4,5,0xf4b32d);
+ box(world,-7,.7,-29,.3,1.4,5,0xf4b32d);
+}
+
+/* ---------------- MACHINES ---------------- */
+
+function addWheels(parent){
+ for(const x of [-1.65,1.65]){
+  for(const z of [-1.1,1.1]){
+   const w=cylinder(parent,x,.65,z,.65,.42,0x20262c,'x');
+   rotors.push(w);
+  }
+ }
+}
+
+function createVehicle(color){
+ const v=new THREE.Group();
+
+ box(v,0,1.25,0,3,1.1,4,color);
+ box(v,0,2,-.6,2,1.3,1.5,0x263d4c);
+ box(v,0,2,-.6,1.7,.95,1.2,0x8cc3d1);
+ addWheels(v);
+
+ world.add(v);
+ v.position.set(0,0,9);
+ return v;
+}
+
+function createExcavator(){
+ machine=createVehicle(0xf1ae25);
+
+ const base=new THREE.Group();
+ base.position.set(0,1.8,-1.15);
+ base.rotation.y=Math.PI;
+ machine.add(base);
+
+ cylinder(base,0,0,0,1.1,.5,0x33383b);
+ box(base,0,.65,0,1.6,1.1,1.8,0xeeb12c);
+ box(base,0,1.25,-.4,1.2,.6,1,0x243c4b);
+
+ arm=new THREE.Group();
+ arm.position.set(0,1.1,.5);
+ base.add(arm);
+
+ box(arm,0,0,1.2,.4,.45,2.4,0xf0b22a);
+ sphere(arm,0,0,0,.3,0x34383c);
+
+ secondArm=new THREE.Group();
+ secondArm.position.set(0,0,2.3);
+ arm.add(secondArm);
+
+ box(secondArm,0,0,.85,.32,.35,1.9,0xe8aa22);
+ sphere(secondArm,0,0,0,.22,0x33383c);
+
+ bucket=new THREE.Group();
+ bucket.position.set(0,-.25,1.85);
+ secondArm.add(bucket);
+
+ box(bucket,0,-.2,.1,.9,.5,.8,0x39434a);
+ for(let i=-1;i<=1;i++){
+  box(bucket,i*.25,-.5,.42,.12,.4,.2,0x39434a);
+ }
+
+ // Truck parked nearby
+ const truck=createVehicle(0x277cc2);
+ truck.position.set(8,0,7);
+ truck.scale.set(.9,.9,.9);
+ truckBed=new THREE.Group();
+ truckBed.position.set(0,2,1);
+ truck.add(truckBed);
+ box(truckBed,0,.3,0,2.8,.4,3,0x545d66);
+ box(truckBed,-1.3,.8,0,.15,1,3,0x424c54);
+ box(truckBed,1.3,.8,0,.15,1,3,0x424c54);
+ box(truckBed,0,.8,1.45,2.7,1,.15,0x424c54);
+}
+
+function createTruck(){
+ machine=createVehicle(0x2781c8);
+ truckBed=new THREE.Group();
+ truckBed.position.set(0,2,1);
+ machine.add(truckBed);
+ box(truckBed,0,.3,0,2.8,.4,3,0x545d66);
+ box(truckBed,-1.3,.8,0,.15,1,3,0x424c54);
+ box(truckBed,1.3,.8,0,.15,1,3,0x424c54);
+ box(truckBed,0,.8,1.45,2.7,1,.15,0x424c54);
+}
+
+function createCrane(){
+ machine=createVehicle(0xf2b42c);
+ box(machine,0,3,0,.7,3,.7,0xe9a61d);
+ box(machine,0,4.8,-1.8,.5,.5,5,0xf2ad20);
+
+ hook=new THREE.Group();
+ hook.position.set(0,4,-3.7);
+ machine.add(hook);
+
+ cylinder(hook,0,-1,0,.05,2,0x292929);
+ box(hook,0,-2,0,.6,.3,.6,0x343a40);
+}
+
+function createTractor(){
+ machine=createVehicle(0x33994b);
+ box(machine,0,2.4,-.4,2.1,1.4,1.8,0x28843b);
+ box(machine,0,3,-.5,1.7,.15,1.5,0x8cc5d7);
+}
+
+function createFactory(){
+ machine=new THREE.Group();
+ world.add(machine);
+
+ box(machine,0,1,0,5,2,5,0x4b5a66);
+ box(machine,0,2.3,0,4,.4,4,0x263d4d);
+
+ conveyor=new THREE.Group();
+ machine.add(conveyor);
+
+ for(let i=0;i<9;i++){
+  const roller=cylinder(conveyor,-6+i*1.5,.65,0,.45,.7,0x272d32,'x');
+  rotors.push(roller);
+ }
+ box(conveyor,0,.15,0,16,.3,3,0x39454e);
+
+ for(let i=0;i<4;i++){
+  box(machine,-5+i*3,2.8,0,.5,4,.5,0xf2b02a);
+ }
+}
+
+/* ---------------- START / EXIT ---------------- */
+
+function startGame(m){
+ mode=m;
+ active=true;
+ load=0;
+ cleaned=0;
+ mud=[];
+ rotors=[];
+ arm=null;
+ secondArm=null;
+ bucket=null;
+ hook=null;
+ truckBed=null;
+ machine=null;
+
+ while(world.children.length){
+  world.remove(world.children[0]);
+ }
+
+ createGround();
+
+ if(m==='excavator')createExcavator();
+ if(m==='truck')createTruck();
+ if(m==='crane')createCrane();
+ if(m==='tractor')createTractor();
+ if(m==='factory')createFactory();
+
+ camAngle=0;
+ camHeight=10;
+ keys.clear();
+
+ document.querySelector('#menu').style.display='none';
+ document.querySelector('#hud').style.display='flex';
+ document.querySelector('#info').style.display='block';
+ document.querySelector('#help').style.display='block';
+ document.querySelector('#controls').style.display='flex';
+ document.querySelector('#exit').style.display='block';
+ document.querySelector('#settings').style.display='block';
+
+ updateHUD();
+ toast(m.toUpperCase()+' READY!');
+}
+
+function backToMenu(){
+ active=false;
+ keys.clear();
+
+ document.querySelector('#menu').style.display='flex';
+ ['hud','info','help','controls','exit','settings'].forEach(id=>{
+  document.getElementById(id).style.display='none';
+ });
+}
+
+function updateHUD(){
+ document.querySelector('#money').textContent=money;
+ document.querySelector('#cleaned').textContent=cleaned;
+ document.querySelector('#load').textContent=load;
+
+ document.querySelector('#info').innerHTML=
+  '<b>'+mode.toUpperCase()+'</b><br>'+
+  'Operation: '+operationName()+'<br>'+
+  'Bucket capacity: '+load+'/10<br>'+
+  'SPACE: Dig • F: Unload';
+}
+
+function operationName(){
+ if(mode==='excavator')return 'Mud excavation';
+ if(mode==='truck')return 'Material transport';
+ if(mode==='crane')return 'Crane lifting';
+ if(mode==='tractor')return 'Farm driving';
+ return 'Factory operation';
+}
+
+function toast(message){
+ const el=document.querySelector('#toast');
+ el.textContent=message;
+ el.style.display='block';
+ clearTimeout(toast.timer);
+ toast.timer=setTimeout(()=>el.style.display='none',2000);
+}
+
+/* ---------------- MUD SYSTEM ---------------- */
+
+function digMud(){
+ if(mode!=='excavator'||!bucket){
+  toast('Select the excavator to dig mud');
+  return;
+ }
+
+ if(load>=10){
+  toast('Bucket full! Press F to unload');
+  return;
+ }
+
+ const pos=new THREE.Vector3();
+ bucket.getWorldPosition(pos);
+
+ // Find mud near the bucket
+ const nearby=mud.filter(m=>{
+  return m.position.distanceTo(pos)<5;
+ }).slice(0,10-load);
+
+ if(nearby.length===0){
+  toast('Move the excavator bucket closer to the mud');
+  return;
+ }
+
+ nearby.forEach(m=>{
+  world.remove(m);
+  mud=mud.filter(item=>item!==m);
+  load++;
+  cleaned++;
+ });
+
+ money+=nearby.length*2;
+ localStorage.setItem('mechMoney',money);
+ updateHUD();
+ toast('Mud collected! +₹'+nearby.length*2);
+}
+
+function unload(){
+ if(mode==='excavator'){
+  if(load===0){
+   toast('Bucket is empty');
+   return;
+  }
+
+  const amount=load;
+  load=0;
+  money+=amount*20;
+  localStorage.setItem('mechMoney',money);
+  updateHUD();
+  toast('Mud unloaded! Earned ₹'+amount*20);
+  return;
+ }
+
+ if(mode==='truck'){
+  if(truckBed){
+   truckBed.rotation.x=truckBed.rotation.x===0?-.45:0;
+   toast('Dump truck bed operated');
+  }
+  return;
+ }
+
+ if(mode==='crane'){
+  toast('Use Q and E to control the hook');
+  return;
+ }
+
+ toast('No unloading action for this machine');
+}
+
+/* ---------------- INPUT SYSTEM ---------------- */
+
+function isDown(...names){
+ return names.some(name=>keys.has(name));
+}
+
+window.addEventListener('keydown',e=>{
+ const key=e.key.toLowerCase();
+
+ if(['w','a','s','d','q','e','f',' ','arrowup','arrowdown','arrowleft','arrowright'].includes(key)){
+  e.preventDefault();
+  keys.add(key);
+ }
+
+ if(key==='escape')backToMenu();
+ if(e.code==='Space'&&!e.repeat)digMud();
+ if(key==='f'&&!e.repeat)unload();
+},{passive:false});
+
+window.addEventListener('keyup',e=>{
+ keys.delete(e.key.toLowerCase());
+});
+
+window.addEventListener('blur',()=>{
+ keys.clear();
+});
+
+/* Mobile buttons: hold to move */
+document.querySelectorAll('[data-key]').forEach(btn=>{
+ const key=btn.dataset.key;
+
+ const down=e=>{
+  e.preventDefault();
+  keys.add(key);
+ };
+ const up=e=>{
+  e.preventDefault();
+  keys.delete(key);
+ };
+
+ btn.addEventListener('pointerdown',down);
+ btn.addEventListener('pointerup',up);
+ btn.addEventListener('pointerleave',up);
+ btn.addEventListener('pointercancel',up);
+});
+
+document.querySelector('[data-action="dig"]').addEventListener('click',digMud);
+document.querySelector('[data-action="unload"]').addEventListener('click',unload);
+
+/* ---------------- CAMERA ---------------- */
+
+renderer.domElement.addEventListener('pointerdown',e=>{
+ if(!active)return;
+ dragging=true;
+ lastX=e.clientX;
+ lastY=e.clientY;
+});
+
+window.addEventListener('pointerup',()=>dragging=false);
+
+window.addEventListener('pointermove',e=>{
+ if(!dragging||!active)return;
+
+ camAngle-=(e.clientX-lastX)*.006;
+ camHeight=Math.max(5,Math.min(20,camHeight+(e.clientY-lastY)*.04));
+
+ lastX=e.clientX;
+ lastY=e.clientY;
+});
+
+/* ---------------- GRAPHICS ---------------- */
+
+function setQuality(q){
+ quality=q;
+
+ const settings={
+  low:{pixel:1,shadows:false},
+  medium:{pixel:1.4,shadows:true},
+  high:{pixel:1.75,shadows:true},
+  ultra:{pixel:2,shadows:true}
+ };
+
+ renderer.setPixelRatio(Math.min(devicePixelRatio,settings[q].pixel));
+ renderer.shadowMap.enabled=settings[q].shadows;
+ sun.castShadow=settings[q].shadows;
+ renderer.setSize(innerWidth,innerHeight);
+ toast('Graphics: '+q.toUpperCase());
+}
+
+function cycleQuality(){
+ const list=['low','medium','high','ultra'];
+ const next=(list.indexOf(quality)+1)%list.length;
+ quality=list[next];
+ document.querySelector('#quality').value=quality;
+ setQuality(quality);
+}
+
+/* ---------------- GAME LOOP ---------------- */
+
+function animate(){
+ requestAnimationFrame(animate);
+
+ const dt=Math.min(clock.getDelta(),.05);
+
+ if(active&&machine){
+
+  let moving=false;
+
+  // Forward and backward relative to the machine's facing direction
+  if(isDown('w','arrowup')){
+   machine.position.x-=Math.sin(machine.rotation.y)*dt*6;
+   machine.position.z-=Math.cos(machine.rotation.y)*dt*6;
+   moving=true;
+  }
+
+  if(isDown('s','arrowdown')){
+   machine.position.x+=Math.sin(machine.rotation.y)*dt*6;
+   machine.position.z+=Math.cos(machine.rotation.y)*dt*6;
+   moving=true;
+  }
+
+  if(isDown('a','arrowleft')){
+   machine.rotation.y+=dt*1.5;
+  }
+
+  if(isDown('d','arrowright')){
+   machine.rotation.y-=dt*1.5;
+  }
+
+  if(moving){
+   rotors.forEach(w=>w.rotation.x+=dt*5);
+  }
+
+  // Excavator arm
+  if(arm){
+   if(isDown('q'))arm.rotation.x=Math.max(-1.1,arm.rotation.x-dt*.8);
+   if(isDown('e'))arm.rotation.x=Math.min(1.1,arm.rotation.x+dt*.8);
+  }
+
+  if(secondArm){
+   if(isDown('q'))secondArm.rotation.x=Math.max(-1.3,secondArm.rotation.x-dt*.8);
+   if(isDown('e'))secondArm.rotation.x=Math.min(1.3,secondArm.rotation.x+dt*.8);
+  }
+
+  // Crane hook
+  if(hook){
+   if(isDown('q'))hook.position.y=Math.min(6,hook.position.y+dt*2);
+   if(isDown('e'))hook.position.y=Math.max(1,hook.position.y-dt*2);
+  }
+
+  // Camera follows machine
+  camera.position.set(
+   machine.position.x+Math.sin(camAngle)*14,
+   camHeight,
+   machine.position.z+Math.cos(camAngle)*14
+  );
+
+  camera.lookAt(machine.position.x,1,machine.position.z);
+
+  // Keep machine inside the world
+  machine.position.x=THREE.MathUtils.clamp(machine.position.x,-70,70);
+  machine.position.z=THREE.MathUtils.clamp(machine.position.z,-70,70);
+ }
+
+ renderer.render(scene,camera);
+}
+
+window.startGame=startGame;
+window.backToMenu=backToMenu;
+window.setQuality=setQuality;
+window.cycleQuality=cycleQuality;
+
+window.addEventListener('resize',()=>{
+ camera.aspect=innerWidth/innerHeight;
+ camera.updateProjectionMatrix();
+ renderer.setSize(innerWidth,innerHeight);
+});
+
+animate();
+</script>
+</body>
+</html>
